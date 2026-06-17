@@ -193,7 +193,7 @@ def build_text(by_tutor):
          f"_Academic tutoring branch · {TODAY:%A, %B %-d, %Y}_",
          "",
          f"*{lessons} unconfirmed lessons | {tutors} tutors | ${total:,.0f} unbilled | Action required {need}*",
-         f"{ontrack} currently in follow-up sequence — flagged next week if they don't convert."]
+         f"{ontrack} currently in follow-up sequence."]
 
     def section(key, emoji, title, sub):
         b = buckets[key]
@@ -213,15 +213,7 @@ def build_text(by_tutor):
     section("seq", "🟢", "In follow-up sequence", "0–5 days")
     section("human", "🟠", "Needs escalation", "5+ days late")
 
-    stale = buckets["stale"]
-    if stale:
-        L.append("")
-        L.append("━━━━━━━━━━━━━━━━━━")
-        L.append(f"⚪ *Stale* | {len(stale)} tutor{'s' if len(stale) != 1 else ''} | ${sum(t['est'] for t in stale):,.0f}")
-        L.append("_30+ days unconfirmed — review for cleanup_")
-        L.append("")
-        for t in stale:                # every person, one line each
-            L.append(stale_line(t))
+    section("stale", "⚪", "Stale", "30+ days unconfirmed — review for cleanup")
 
     L.append("")
     L.append("_Mark lessons complete in TutorCruncher before invoices can be sent._")
