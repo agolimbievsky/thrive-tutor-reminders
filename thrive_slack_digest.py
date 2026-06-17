@@ -33,10 +33,10 @@ TODAY = dt.date.today()
 WEBHOOK = (os.environ.get("SLACK_WEBHOOK_URL") or "").strip()
 DELAY = 0.35
 
-# tier edges (days overdue)
-SEQ_MIN, SEQ_MAX = 3, 6
-HUMAN_MIN, HUMAN_MAX = 7, 29
-STALE_MIN = 30
+# tier edges (days overdue, by newest session)
+SEQ_MIN, SEQ_MAX = 0, 5      # in follow-up sequence: 0–5 days
+HUMAN_MIN, HUMAN_MAX = 6, 29  # needs escalation: 5+ days late
+STALE_MIN = 30               # stale: 30+ days
 
 
 def tc_key():
@@ -107,7 +107,7 @@ def gather():
         t["lessons"].append({"date": (d.get("start") or "")[:10], "days": days,
                              "student": rcra.get("recipient_name") or "?",
                              "family": rcra.get("paying_client_name") or rcra.get("recipient_name") or "?",
-                             "est": est})
+                             "est": est, "status": d.get("status") or "?"})
     for t in by_tutor.values():
         t["count"] = len(t["lessons"])
         t["est"] = sum(l["est"] for l in t["lessons"])
@@ -150,25 +150,31 @@ def day_range(t):
     return f"{t['min_days']}d" if t["min_days"] == t["max_days"] else f"{t['min_days']}–{t['max_days']}d"
 
 
-def session_line(l, show_payer=True):
-    payer = f"  _(paid by {l['family']})_" if show_payer else ""
-    return f"    {l['student']}, {fmt_date(l['date'])} — ${l['est']:,.0f}{payer}"
+def session_line(l):
+    # column order: Date | Days | Student | Family | Cost | Status
+    return f"    {l['date']} | {l['days']}d | {l['student']} | {l['family']} | ${l['est']:,.0f} | {l['status']}"
 
 
 def tutor_block(t):
-    """Clean per-tutor layout: name + contact, then sessions. Collapses to one
-    line when all sessions are the same student/family."""
+    """Name + rollup (sessions | $) on the SAME line, contact below, then EVERY session."""
     email, mobile = get_contact(t["cid"])
     contact = " · ".join([x for x in [email, mobile or "no mobile"] if x])
-    out = [f"*{t['name']}*" + (f"  —  {contact}" if contact else "")]
-    ss = t["lessons"]
-    if len(ss) == 1:
-        out.append(session_line(ss[0]))
-    else:
-        out.append(f"    {len(ss)} sessions · ${t['est']:,.0f}")
-        for l in ss:
-            out.append(session_line(l))   # every session: date + student + family
+    n = t["count"]
+    out = [f"*{t['name']}* — {n} session{'s' if n != 1 else ''} | ${t['est']:,.0f}"]
+    if contact:
+        out.append(f"    {contact}")
+    for l in t["lessons"]:             # list ALL sessions, never truncate
+        out.append(session_line(l))
     return out
+
+
+def stale_line(t):
+    """One line per stale tutor: name — sessions | $ — contact (no lesson rows)."""
+    email, mobile = get_contact(t["cid"])
+    contact = " · ".join([x for x in [email, mobile or "no mobile"] if x])
+    n = t["count"]
+    base = f"*{t['name']}* — {n} session{'s' if n != 1 else ''} | ${t['est']:,.0f}"
+    return base + (f" — {contact}" if contact else "")
 
 
 def build_text(by_tutor):
@@ -183,16 +189,11 @@ def build_text(by_tutor):
     buckets["stale"].sort(key=lambda x: x["est"], reverse=True)
     need, ontrack = len(buckets["human"]), len(buckets["seq"])
 
-    if need:
-        lead = f"*Action needed on {need} tutor{'s' if need != 1 else ''}.*"
-    else:
-        lead = "*No tutors need escalation this week.*"
-    lead += (f" {ontrack} currently in sequence — "
-             "will be flagged next week if they don't convert.")
-
     L = ["*Tutoring sessions awaiting confirmation*",
-         "Academic tutoring branch",
-         f"_{TODAY:%A, %B %-d, %Y}_", "", lead]
+         f"_Academic tutoring branch · {TODAY:%A, %B %-d, %Y}_",
+         "",
+         f"*{lessons} unconfirmed lessons | {tutors} tutors | ${total:,.0f} unbilled | Action required {need}*",
+         f"{ontrack} currently in follow-up sequence — flagged next week if they don't convert."]
 
     def section(key, emoji, title, sub):
         b = buckets[key]
@@ -201,23 +202,26 @@ def build_text(by_tutor):
         st = sum(t["est"] for t in b)
         L.append("")
         L.append("━━━━━━━━━━━━━━━━━━")
-        L.append(f"{emoji} *{title}* · {len(b)} tutor{'s' if len(b) != 1 else ''} · ${st:,.0f}")
+        L.append(f"{emoji} *{title}* | {len(b)} tutor{'s' if len(b) != 1 else ''} | ${st:,.0f}")
         L.append(f"_{sub}_")
+        L.append("_Date | Days | Student | Family | Cost | Status_")
         L.append("")
         for t in b:
             L.extend(tutor_block(t))
             L.append("")
 
-    section("seq", "🟢", "Currently in sequence", "0–6 days — in the reminder sequence")
-    section("human", "🟠", "Needs escalation", "7+ days unconfirmed — execute escalation sequence")
+    section("seq", "🟢", "In follow-up sequence", "0–5 days")
+    section("human", "🟠", "Needs escalation", "5+ days late")
 
     stale = buckets["stale"]
     if stale:
-        top = " · ".join(f"{t['name']} ${t['est']:,.0f}" for t in stale[:3])
         L.append("")
         L.append("━━━━━━━━━━━━━━━━━━")
-        L.append(f"⚪ *Old backlog* · {len(stale)} tutor{'s' if len(stale) != 1 else ''} · ${sum(t['est'] for t in stale):,.0f}")
-        L.append(f"_2024 sessions being voided in cleanup — not new. Biggest: {top}._")
+        L.append(f"⚪ *Stale* | {len(stale)} tutor{'s' if len(stale) != 1 else ''} | ${sum(t['est'] for t in stale):,.0f}")
+        L.append("_30+ days unconfirmed — review for cleanup_")
+        L.append("")
+        for t in stale:                # every person, one line each
+            L.append(stale_line(t))
 
     L.append("")
     L.append("_Mark lessons complete in TutorCruncher before invoices can be sent._")
