@@ -1,0 +1,35 @@
+name: Thrive SMS nudge
+
+# Runs every weekday morning (~9-10am US Central, depending on daylight saving),
+# plus a manual "Run workflow" button for testing. GitHub cron is always UTC.
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"   # 15:00 UTC = 10:00am CDT / 9:00am CST, Mon-Fri
+  workflow_dispatch:          # the manual run button in the Actions tab
+
+jobs:
+  nudge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # SAFETY: this runs in DRY-RUN by default — it prints exactly who WOULD be
+      # texted and the message, and sends nothing. To actually send, add " --send"
+      # to the end of the run line below. Do that only at the test-to-your-phone
+      # step, with the TEST_TO secret set so every message routes to you, never a tutor.
+      - name: Run nudge
+        env:
+          TC_API_KEY:         ${{ secrets.TC_API_KEY }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN:  ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM:        ${{ secrets.TWILIO_FROM }}
+          TC_SUBMIT_URL:      ${{ secrets.TC_SUBMIT_URL }}
+          TEST_TO:            ${{ secrets.TEST_TO }}
+        run: python3 thrive_sms_nudge.py
