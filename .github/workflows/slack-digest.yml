@@ -2,7 +2,7 @@ name: Thrive weekly Slack digest
 
 on:
   schedule:
-    - cron: "0 14 * * 4"
+    - cron: "0 19 * * 4"
   workflow_dispatch:
 
 jobs:
