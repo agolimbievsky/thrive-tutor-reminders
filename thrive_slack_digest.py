@@ -2,12 +2,12 @@
 """
 Thrive — weekly Slack digest of unconfirmed lessons (READ-ONLY).
 
-Posts one message to a Slack channel bucketing every tutor with unconfirmed
-lessons into three tiers, so a human can see the whole field at a glance:
+Posts one Slack message bucketing every tutor with unconfirmed TutorCruncher
+lessons into three tiers, by their NEWEST unconfirmed session:
 
-  In sequence   3-6 days   the SMS nudge is working these
-  Needs a human 7-29 days  someone should reach out
-  Stale         30+ days   old backlog (likely void)
+  In follow-up sequence  0-5 days    reminders are handling these
+  Needs escalation       6-29 days   a human should reach out
+  Stale                  30+ days    old backlog to review / void
 
 Reads TutorCruncher only with GET. Writes nothing there. Posts to Slack via an
 Incoming Webhook. If SLACK_WEBHOOK_URL isn't set, it prints the digest instead
@@ -33,10 +33,9 @@ TODAY = dt.date.today()
 WEBHOOK = (os.environ.get("SLACK_WEBHOOK_URL") or "").strip()
 DELAY = 0.35
 
-# tier edges (days overdue, by newest session)
-SEQ_MIN, SEQ_MAX = 0, 5      # in follow-up sequence: 0–5 days
-HUMAN_MIN, HUMAN_MAX = 6, 29  # needs escalation: 5+ days late
-STALE_MIN = 30               # stale: 30+ days
+# tier edges by newest unconfirmed session (days overdue)
+SEQ_MAX = 5    # 0–5 days  -> in follow-up sequence
+HUMAN_MAX = 29  # 6–29 days -> needs escalation; 30+ -> stale
 
 
 def tc_key():
@@ -117,14 +116,6 @@ def gather():
     return by_tutor
 
 
-def fmt_date(s):
-    try:
-        d = dt.date.fromisoformat(s)
-        return d.strftime("%b %-d") if d.year == TODAY.year else d.strftime("%b %-d, %Y")
-    except ValueError:
-        return s or "?"
-
-
 def get_contact(cid):
     """Tutor email + mobile, for the tiers a human acts on. ('' if unavailable.)"""
     if cid == "none":
@@ -143,13 +134,6 @@ def tier(newest_days):
     return "stale"
 
 
-STALE_SHOW = int(os.environ.get("STALE_SHOW", "8"))  # how many legacy tutors to name
-
-
-def day_range(t):
-    return f"{t['min_days']}d" if t["min_days"] == t["max_days"] else f"{t['min_days']}–{t['max_days']}d"
-
-
 def session_line(l):
     # column order: Date | Days | Student | Family | Cost | Status
     return f"    {l['date']} | {l['days']}d | {l['student']} | {l['family']} | ${l['est']:,.0f} | {l['status']}"
@@ -166,15 +150,6 @@ def tutor_block(t):
     for l in t["lessons"]:             # list ALL sessions, never truncate
         out.append(session_line(l))
     return out
-
-
-def stale_line(t):
-    """One line per stale tutor: name — sessions | $ — contact (no lesson rows)."""
-    email, mobile = get_contact(t["cid"])
-    contact = " · ".join([x for x in [email, mobile or "no mobile"] if x])
-    n = t["count"]
-    base = f"*{t['name']}* — {n} session{'s' if n != 1 else ''} | ${t['est']:,.0f}"
-    return base + (f" — {contact}" if contact else "")
 
 
 def build_text(by_tutor):
