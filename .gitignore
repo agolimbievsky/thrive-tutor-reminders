@@ -1,0 +1,6 @@
+# NEVER commit secrets — keys live in GitHub Actions "Secrets", not in the repo.
+.tc_key
+.env
+*.key
+__pycache__/
+*.pyc
