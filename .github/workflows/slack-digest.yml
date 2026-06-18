@@ -2,7 +2,7 @@ name: Thrive weekly Slack digest
 
 on:
   schedule:
-    - cron: "0 19 * * 4"
+    - cron: "36 18 * * 4"   # 18:36 UTC Thu = 1:36pm Central (off :00 to dodge GitHub congestion)
   workflow_dispatch:
 
 jobs:
